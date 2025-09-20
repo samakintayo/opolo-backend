@@ -132,7 +132,7 @@ app.get("/api/registrations", async (req, res) => {
     res.json({ success: true, registrations: data });
   } catch (err) {
     console.error("Fetch registrations error:", err.message);
-    res.status(500).json({ success: false, message: "Failed to fetch registrations" });
+    res.status(500).json({ success: false, message: "Failed to fetch registrations." });
   }
 });
 

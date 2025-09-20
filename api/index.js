@@ -1,9 +1,40 @@
+// --------------------
+// Imports
+// --------------------
+const express = require("express");
+const axios = require("axios");
+const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
+const serverless = require("serverless-http");
+require("dotenv").config();
 
-// Supabase setup
+// --------------------
+// App & Middleware
+// --------------------
+const app = express();
+
+app.use(
+  cors({
+    origin: "https://opolo-global.vercel.app", // your frontend URL
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+  })
+);
+
+app.use(express.json()); // parse JSON bodies
+
+// --------------------
+// Supabase Setup
+// --------------------
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY; // Use service role key for server writes
+const SUPABASE_KEY = process.env.SUPABASE_KEY; // service role key for server-side writes
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// --------------------
+// Config: Centiiv API
+// --------------------
+const CENTIIV_API_KEY = process.env.CENTIIV_API_KEY;
+const CENTIIV_BASE_URL = process.env.CENTIIV_BASE_URL;
 
 // --------------------
 // Initiate Payment
@@ -12,7 +43,6 @@ app.post("/api/initiate-payment", async (req, res) => {
   try {
     const { name, email, phone, location, programType, amount } = req.body;
 
-    // Call Centiiv API
     const response = await axios.post(
       `${CENTIIV_BASE_URL}/api/v1/payments`,
       {
@@ -25,46 +55,34 @@ app.post("/api/initiate-payment", async (req, res) => {
         webhook_url: "https://opolo-api.vercel.app/webhook/payment",
         metadata: { phone, location, programType },
       },
-      {
-        headers: { Authorization: `Bearer ${CENTIIV_API_KEY}` },
-      }
+      { headers: { Authorization: `Bearer ${CENTIIV_API_KEY}` } }
     );
 
-    if (!response.data?.success) {
+    if (!response.data?.success)
       return res.status(500).json({ success: false, message: "Centiiv API error" });
-    }
 
     const paymentData = response.data.data;
 
     // Save registration to Supabase
-    const { error } = await supabase
-      .from("registrations")
-      .insert([
-        {
-          name,
-          email,
-          phone,
-          location,
-          program_type: programType,
-          amount,
-          payment_id: paymentData.id,
-          status: "pending",
-        },
-      ]);
+    const { error } = await supabase.from("registrations").insert([
+      {
+        name,
+        email,
+        phone,
+        location,
+        program_type: programType,
+        amount,
+        payment_id: paymentData.id,
+        status: "pending",
+      },
+    ]);
 
-    if (error) {
-      console.error("Supabase insert error:", error.message);
-      return res.status(500).json({ success: false, message: "Database error" });
-    }
+    if (error) throw error;
 
-    res.json({
-      success: true,
-      paymentUrl: paymentData.link,
-    });
-
-    console.log("Centiiv initiated payment:", paymentData);
-  } catch (error) {
-    console.error("Initiation error:", error.response?.data || error.message);
+    res.json({ success: true, paymentUrl: paymentData.link });
+    console.log("Centiiv payment created:", paymentData.id);
+  } catch (err) {
+    console.error("Initiate Payment Error:", err.response?.data || err.message);
     res.status(500).json({ success: false, message: "Payment initiation failed" });
   }
 });
@@ -76,18 +94,17 @@ app.post("/webhook/payment", express.raw({ type: "application/json" }), async (r
   try {
     const event = JSON.parse(req.body.toString());
     const paymentId = event.data.id || event.data.metadata?.resourceId?.replace("DPL-", "");
-
     if (!paymentId) return res.sendStatus(400);
 
-    let normalizedStatus = "pending";
-    const eventType = event.event?.toLowerCase();
-    if (eventType.includes("success")) normalizedStatus = "success";
-    else if (eventType.includes("fail")) normalizedStatus = "failed";
+    const status = event.event.toLowerCase().includes("success")
+      ? "success"
+      : event.event.toLowerCase().includes("fail")
+      ? "failed"
+      : "pending";
 
-    // Update Supabase
     const { error } = await supabase
       .from("registrations")
-      .update({ status: normalizedStatus, paid_at: new Date().toISOString() })
+      .update({ status, paid_at: new Date().toISOString() })
       .eq("payment_id", paymentId);
 
     if (error) console.error("Supabase update error:", error.message);
@@ -100,15 +117,16 @@ app.post("/webhook/payment", express.raw({ type: "application/json" }), async (r
 });
 
 // --------------------
-// Fetch Registrations (Admin)
+// Fetch Registrations (Admin) with optional programType filter
 // --------------------
 app.get("/api/registrations", async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from("registrations")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { programType } = req.query;
 
+    let query = supabase.from("registrations").select("*").order("created_at", { ascending: false });
+    if (programType) query = query.eq("program_type", programType);
+
+    const { data, error } = await query;
     if (error) throw error;
 
     res.json({ success: true, registrations: data });
@@ -117,3 +135,9 @@ app.get("/api/registrations", async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to fetch registrations" });
   }
 });
+
+// --------------------
+// Serverless Export
+// --------------------
+module.exports = app;
+module.exports.handler = serverless(app);

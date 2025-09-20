@@ -151,7 +151,7 @@ app.post("/api/initiate-payment", async (req, res) => {
         currency: "NGN",
         note: `Payment for ${programType}`,
         callback_url: "https://opolo-global.vercel.app/payment-status",
-        webhook_url: "https://opolo-global.vercel.app/api/webhook/payment",
+        webhook_url: "https://opolo-api.vercel.app/webhook/payment",
         metadata: { phone, location, programType },
       },
     });

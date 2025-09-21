@@ -24,7 +24,7 @@ app.use(
 app.use(express.json()); // parse JSON bodies
 
 // --------------------
-// Supabase Setup
+// Supabase Setups
 // --------------------
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY; // service role key for server-side writes
